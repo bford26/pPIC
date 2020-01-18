@@ -1,17 +1,18 @@
 import math, random, sys
+import numpy as np
 
 import pygame
 from pygame.locals import *
 
 from grid import grid2D
 from spot import YeeSpot
-from particle import particle, randomDist
+from particle import particle, randomDist, ellipseDist
 
 
 
 #===================#
 pygame.init()
-size = width, height = 1000, 1000
+size = width, height = 750, 750
 screen = pygame.display.set_mode(size)
 run = True
 
@@ -34,19 +35,23 @@ def getE(x,y,phi,spacing):
     i = math.floor(x/spacing)
     j = math.floor(y/spacing)
 
-    if(i>0 and i<xSize-1):
+    if(i>0 and i<xSize-1 and j<ySize):
         Ex = 0.5*(phi[i-1][j] - phi[i+1][j])/spacing
-    elif(i>0 and not i<xSize-1):
+    elif(i>0 and not i<xSize-1 and j<ySize):
         Ex = (phi[i-1][j] - phi[i][j])/spacing
-    elif(i<xSize-1 and not i>0):
+    elif(i<xSize-1 and not i>0 and j<ySize):
         Ex = (phi[i][j] - phi[i+1][j])/spacing
+    else:
+        Ex = 0
 
-    if(j>0 and j<ySize-1):
+    if(j>0 and j<ySize-1 and i<xSize):
         Ey = 0.5*(phi[i][j-1] - phi[i][j+1])/spacing
-    elif(j>0 and not j<ySize-1):
+    elif(j>0 and not j<ySize-1 and i<xSize):
         Ey = (phi[i][j-1] - phi[i][j])/spacing
-    elif(j<ySize-1 and not j>0):
+    elif(j<ySize-1 and not j>0 and i<xSize):
         Ey = (phi[i][j] - phi[i][j+1])/spacing
+    else:
+        Ey = 0
 
     return [Ex,Ey]
 
@@ -61,25 +66,25 @@ def getE(x,y,phi,spacing):
 # Larmor Freq
 # w_c = q * B / (m_e*c)
 
+SingleParticle = False
 count = 0
 run = True
-ActualParticles = 10000
-MacroNumber = 10
+ActualParticles = 100
+MacroNumber = 100
 sp_wt = ActualParticles/MacroNumber
 
 T_e = 1.0e3
 n0 = MacroNumber
 
-dt = 0.001
+dt = 1.0e-10
 
-xSize = 50
-ySize = 50
+xSize = 100
+ySize = 100
 
-xMax = 10
-xMin = 0
-yMax = 10
-yMin = 0
-
+xMax = 40
+xMin = -40
+yMax = 40
+yMin = -40
 
 #======== Create Environment ========#
 
@@ -98,12 +103,22 @@ for i in range(len(Grid.g)):
 #======== Make distribution ========#
 
 # giving an average velocity we will get a unifrom distribution around that point
-rDist = randomDist( [Grid.xmin,Grid.xmax], [Grid.ymin,Grid.ymax], vavg=2.0)
 
-for i in range(MacroNumber):
-    [r,v] = rDist.GetDist()
+if SingleParticle:
+    r = [0.0, 0.0]
+    v = [0.0, 1000.0]
     part = particle(r,v)
-    Grid.particles[i] = part
+    Grid.particles[0] = part
+
+else:
+    rDist = randomDist( [-5,5], [-5,5], vavg=10000.0)
+    # ellDist = ellipseDist([5,1],[1,1])
+
+    for i in range(MacroNumber):
+        [r,v] = rDist.GetDist()
+        part = particle(r,v)
+        Grid.particles[i] = part
+
 
 
 #======== Simulation Loop ========#
@@ -122,38 +137,50 @@ while run:
     # Draw Parts
     for i in range(MacroNumber):
         [x,y] = Grid.particles[i].getR()
+        # print(x,y)
+        x = (8*x+width/2)
+        y = (8*y+height/2)
 
-        x = width * x/xMax
-        y = height * y/yMax
-
-        pygame.draw.circle(screen, white, (math.floor(x),math.floor(y)),3)
+        pygame.draw.circle(screen, white, (math.floor(x),math.floor(y)), 3)
 
     pygame.display.flip()
+
+    # print average velcity
+    avgvel = 0.0
+    for i in range(MacroNumber):
+        [vx,vy] = Grid.particles[i].getV()
+        avgvel += math.sqrt(vx**2+vy**2)
+
+    avgvel /= MacroNumber
+    # print(avgvel)
 
 #======== Charge Projection & Density Cal. ========#
 
     for i in range(MacroNumber):
 
         [x,y] = Grid.particles[i].getR()
-        q = Grid.particles[i].getQ()
+        # print(x,y)
+        if(x>xMin and y>yMin and x<xMax and y<yMax):
 
-        i0 = math.floor(x); j0 = math.floor(y);
-        hx = x - i0; hy = y - j0;
+            q = Grid.particles[i].getQ()
 
-        w1 = (1-hx)*(1-hy)*q
-        w2 = (hx)*(1-hy)*q
-        w3 = (hx)*(hy)*q
-        w4 = (1-hx)*(hy)*q
+            i0 = math.floor(x); j0 = math.floor(y);
+            hx = x - i0; hy = y - j0;
 
-        Grid.g[i0][j0].addQ(w1)
+            w1 = (1-hx)*(1-hy)*q
+            w2 = (hx)*(1-hy)*q
+            w3 = (hx)*(hy)*q
+            w4 = (1-hx)*(hy)*q
 
-        if i0 < xSize-1:
-            Grid.g[i0+1][j0].addQ(w2)
+            Grid.g[i0][j0].addQ(w1)
+
+            if i0 < xSize-1:
+                Grid.g[i0+1][j0].addQ(w2)
+                if j0 < ySize-1:
+                    Grid.g[i0+1][j0+1].addQ(w3)
+
             if j0 < ySize-1:
-                Grid.g[i0+1][j0+1].addQ(w3)
-
-        if j0 < ySize-1:
-            Grid.g[i0][j0+1].addQ(w4)
+                Grid.g[i0][j0+1].addQ(w4)
 
 
     # Get Charges Dist
@@ -188,29 +215,55 @@ while run:
 
 
     # Commit Potential
-    for i in range(len(Grid.g)):
-        for j in range(len(Grid.g[0])):
-            Grid.g[i][j].setPhi(phi[i][j])
+    # for i in range(len(Grid.g)):
+    #     for j in range(len(Grid.g[0])):
+    #         Grid.g[i][j].setPhi(phi[i][j])
 
 
 #======== Half-Acceleration Move Particles ========#
 
     for i in range(MacroNumber):
 
+        # print(x,y)
+
         [x,y] = Grid.particles[i].getR()
         [vx,vy] = Grid.particles[i].getV()
         q = Grid.particles[i].getQ()
         m = Grid.particles[i].getM()
 
-        [Ex, Ey] = getE(x,y,phi,cell_spacing)
+        if(x>xMin and y>yMin and x<xMax and y<yMax):
+            [Ex, Ey] = getE(x,y,phi,cell_spacing)
 
-        """
-        getEx and getEy are place holding functions which will return the E field
-        at posistion of the particle. maybe E[math.floor(x)][math.floor(y)]???
-        """
 
-        vx_new = vx + (q/m) * Ex * dt
-        vy_new = vy + (q/m) * Ey * dt
+            Ez = 0.0
+            Bx,By,Bz = 0.0, 0.0, 0.01 # Tesla
+
+
+            #Boris Method
+
+            """
+            v0 = v_old + qdt/2m E
+            v1 = v0 + 2* (v0 + v0 cross b0) / (1 + b0^2) ; b0 = qdt/2m B
+            vnew = v1 + qdt/2m E
+            """
+            # -------------------
+
+            E = np.array([Ex,Ey,Ez])
+            B = np.array([Bx,By,Bz])
+            v_old = np.array([vx,vy,0.0])
+
+            v0 = np.add(v_old, np.multiply(E, q*dt/(2*m)))
+            b0 = np.multiply(B,q*dt/(2*m))
+            v1 = np.add( v0, np.cross( np.multiply( np.add(v0,np.cross(v0,b0)), 2.0/(1+np.linalg.norm(b0)**2) ), b0)  )
+            v_new = np.add(v1, np.multiply(E, q*dt/(2*m)))
+
+            vx_new = v_new[0]
+
+            vy_new = v_new[1]
+
+        else:
+            vx_new = 0.0
+            vy_new = 0.0
 
         x_new = x + vx_new * dt
         y_new = y + vy_new * dt
@@ -219,10 +272,14 @@ while run:
         Grid.particles[i].x,Grid.particles[i].y = x_new, y_new
 
 
-    if count%25 == 0:
+    if count%500 == 0:
         print(count)
+    # strnum = "PIC%03d.png"%count
+    # pygame.image.save(screen,strnum)
+
 
     count += 1
+
 
 print("Done.")
 pygame.quit()
